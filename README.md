@@ -1,4 +1,4 @@
-![Logo](supporth_banner.png)
+![Logo](img/supporth_banner.png)
 
 
 # SuppOrth
