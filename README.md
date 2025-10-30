@@ -41,3 +41,10 @@ Tab-separated file (`.tsv`) including:
 - Supporting tools
 - BLAST identity & e-value
 - (Optional) Aggregated gene-level support
+
+-----------------------
+Output visualization:
+-----------------------
+![Output figure](img/proposed_output.png)
+
+  
