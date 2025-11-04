@@ -10,11 +10,22 @@ It aggregates orthologue calls from various predictors, enriches them with BLAST
 -----------------------
 Features:
 -----------------------
-- Combine results from multiple orthologue predictors (e.g., Broccoli, SonicParanoid, OrthoFinder, etc.)
+- Combine results from multiple orthologue predictors (e.g., Broccoli, SonicParanoid, OrthoFinder,OMA etc.)
 - Support-aware integration of orthologue calls
 - Use BLAST identity and e-value for additional scoring
 - Optional collapsing of isoforms using protein-to-gene mapping
 - JSON and Pickle support for input formats
+
+-----------------------
+Recomended Orhtology tools
+-----------------------
+The script is not constrained to any specific tool, but it is recomended to combine variety of aligner, clustering stratgies to improve the consensus support.
+
+Here we use:
+- [Orthofinder](https://github.com/davidemms/OrthoFinder?tab=readme-ov-file)
+- [OMA](https://omabrowser.org/standalone/)
+- [SoniParanoid2](https://gitlab.com/salvo981/sonicparanoid2)
+- [Broccoli](https://github.com/rderelle/Broccoli)
 
 -----------------------
 Usage:
