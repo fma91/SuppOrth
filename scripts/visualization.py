@@ -13,6 +13,6 @@ from venny4py.venny4py import *
 
 
 def venn_diagram(orthology_dict, figure_name='suppOrth_Ven'): #Plot function
-    venny4py(sets=orthology_sets3)
+    venny4py(sets=orthology_dict)
     plt.savefig(figure_name + ".svg", bbox_inches="tight")
     
