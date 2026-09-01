@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "supporth"
+version = "0.4.0.dev0"
+description = "Support-based orthologue integration: runs multiple orthology predictors and unifies their calls into a consensus table"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "Fabian Moreno-Avitia" }]
+keywords = ["orthology", "comparative-genomics", "orthofinder", "sonicparanoid", "broccoli"]
+
+dependencies = [
+    "pandas>=1.3",
+    "biopython>=1.79",
+    "matplotlib>=3.4",
+    "venny4py>=1.0",
+]
+
+[project.optional-dependencies]
+viz = ["matplotlib>=3.4", "venny4py>=1.0"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+suppOrth = "supporth.cli:main"
+supporth = "supporth.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+supporth = ["py.typed"]
