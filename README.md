@@ -189,6 +189,22 @@ A run directory contains:
 | `suppOrth.genes.tsv` | gene-level table, when `--collapse` is used |
 | `work/` | each predictor's native output and stage logs |
 
+Example (`head` of `suppOrth.tsv`):
+
+```
+contortus      tmuris            Lv_support  SupportedBy                              orthofinder  sonicparanoid  broccoli  oma  Identity  e_val  Bitscore
+XGW29141.1     TMUE_3000011065   4           orthofinder,sonicparanoid,broccoli,oma   1            1              1         1    49.528    0.0    6611.0
+XGW23970.1     TMUE_3000013576   4           orthofinder,sonicparanoid,broccoli,oma   1            1              1         1    58.248    0.0    5622.0
+XGW20628.1     TMUE_1000003594   4           orthofinder,sonicparanoid,broccoli,oma   1            1              1         1    48.045    0.0    4532.0
+XGW20629.1     TMUE_1000003594   4           orthofinder,sonicparanoid,broccoli,oma   1            1              1         1    48.045    0.0    4532.0
+XGW20630.1     TMUE_1000003594   4           orthofinder,sonicparanoid,broccoli,oma   1            1              1         1    48.045    0.0    4532.0
+XGW20631.1     TMUE_1000003594   4           orthofinder,sonicparanoid,broccoli,oma   1            1              1         1    48.045    0.0    4532.0
+XGW20632.1     TMUE_1000003594   4           orthofinder,sonicparanoid,broccoli,oma   1            1              1         1    48.045    0.0    4532.0
+XGW20634.1     TMUE_1000003594   4           orthofinder,sonicparanoid,broccoli,oma   1            1              1         1    48.045    0.0    4532.0
+XGW20635.1     TMUE_1000003594   4           orthofinder,sonicparanoid,broccoli,oma   1            1              1         1    48.045    0.0    4532.0
+XGW16501.1     TMUE_2000006962   4           orthofinder,sonicparanoid,broccoli,oma   1            1              1         1    88.86     0.0    4352.0
+```
+
 `SupportedBy` holds the **exact set** of predictors that reported a pair, so a
 row states its own agreement pattern (`F+S`, `B` alone, and so on) rather than
 just a count.
@@ -202,19 +218,13 @@ observers. A high count trades recall for precision; it is not a calibrated
 confidence.
 
 -----------------------
-Legacy scripts
------------------------
-The pre-0.4 workflow, where you exported predictor tables by hand and pointed
-`scripts/suppOrth.py` at them, still lives under `scripts/`. It expects
-query-keyed JSON plus pickled BLAST dictionaries; `pairs/<tool>_result_dict.json`
-is written in that format so old analyses stay reproducible.
-
------------------------
 Output visualization:
 -----------------------
-Each run writes `suppOrth.png` (and `.svg`) from the **protein-pair** calls:
-a 2–4 set Venn, a pairwise overlap heatmap, and a bar chart of pairs unique
-to one predictor. Gene-level collapse (`--collapse`) is a table only; it is
-not plotted.
+Each run writes `suppOrth.png` and `suppOrth.svg` from the **protein-pair**
+calls: a 2–4 set Venn, a pairwise overlap heatmap, and a bar chart of pairs
+unique to one predictor. Gene-level collapse (`--collapse`) is a table only;
+it is not plotted.
+
+![Predicted orthologue pairs toward support creation](img/suppOrth.png)
 
   
