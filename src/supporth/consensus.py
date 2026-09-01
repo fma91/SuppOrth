@@ -1,8 +1,9 @@
 """Building the consensus table from several predictor results.
 
 Each predictor has its own 0/1 column (the tool name), so a table can be
-filtered without parsing a string. ``SupportedBy`` still records the same set
-as a comma-separated list of those names, for a compact agreement pattern.
+filtered without parsing a string. ``SupportedBy`` records the same set as a
+comma-separated list of short labels (``F,S,B,O``), for a compact agreement
+pattern.
 
 Two cautions belong with any use of these numbers. Support is not a
 probability, and the predictors are not independent observers — they share
@@ -67,10 +68,12 @@ def build_table(
     sp2: Proteome,
 ) -> pd.DataFrame:
     tools: list[str] = []
+    labels_for: dict[str, str] = {}
     by_tool: dict[str, set[Pair]] = {}
     for result in results:
         if result.tool not in by_tool:
             tools.append(result.tool)
+            labels_for[result.tool] = result.label or result.tool
         by_tool.setdefault(result.tool, set()).update(result.pairs)
 
     universe: set[Pair] = set()
@@ -80,7 +83,7 @@ def build_table(
     records = []
     for left, right in sorted(universe):
         flags = {tool: int((left, right) in by_tool[tool]) for tool in tools}
-        supported_by = [tool for tool in tools if flags[tool]]
+        supported_by = [labels_for[tool] for tool in tools if flags[tool]]
         hit = similarity.get(left, right) if similarity else None
         records.append(
             {

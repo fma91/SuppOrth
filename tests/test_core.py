@@ -99,13 +99,13 @@ def test_consensus_counts_support_and_records_the_pattern(proteomes):
     top = table.iloc[0]
     assert (top["speciesA"], top["speciesB"]) == ("a1", "b1")
     assert top["Lv_support"] == 3
-    assert top["SupportedBy"] == "t1,t2,t3"
+    assert top["SupportedBy"] == "F,S,B"
     assert (top["t1"], top["t2"], top["t3"]) == (1, 1, 1)
     assert top["Identity"] == 88.5
 
     unaligned = table[table["speciesA"] == "a2"].iloc[0]
     assert unaligned["Lv_support"] == 1
-    assert unaligned["SupportedBy"] == "t1"
+    assert unaligned["SupportedBy"] == "F"
     assert (unaligned["t1"], unaligned["t2"], unaligned["t3"]) == (1, 0, 0)
     assert pd.isna(unaligned["Identity"]), "missing alignments must be NA, not 0.0"
 
@@ -120,7 +120,7 @@ def test_agreement_summary_partitions_the_pairs(proteomes):
     summary = consensus.agreement_summary(table)
 
     assert summary["n_pairs"].sum() == len(table)
-    assert set(summary["SupportedBy"]) == {"t1,t2", "t1"}
+    assert set(summary["SupportedBy"]) == {"F,S", "F"}
 
 
 def test_default_filter_keeps_high_support_or_high_identity():
