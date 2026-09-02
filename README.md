@@ -66,6 +66,7 @@ once:
 
     suppOrth run speciesA.faa speciesB.faa -o results/ -t 16
     suppOrth run Mycoplasma_*.faa -o results/ -t 16
+    suppOrth run -f proteomes/ -o results/ -t 16
 
 The consensus table is one row per cross-species protein pair
 (`Species1`, `Species2`, `Protein1`, `Protein2`). Two files still work; more

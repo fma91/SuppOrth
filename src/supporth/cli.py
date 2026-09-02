@@ -20,7 +20,7 @@ from pathlib import Path
 
 from . import __version__, adapters, deps, disk, manifest, paths, shell
 from .pipeline import PipelineError, RunConfig, run_pipeline
-from .proteomes import ProteomeError
+from .proteomes import ProteomeError, fasta_paths_in
 
 
 def _identity_filter(value: str) -> float:
@@ -92,7 +92,9 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--tools", default="all")
 
     run = sub.add_parser("run", help="run the predictors and build the consensus")
-    run.add_argument("fastas", nargs="+", type=Path, metavar="FASTA")
+    run.add_argument("fastas", nargs="*", type=Path, metavar="FASTA")
+    run.add_argument("-f", dest="fasta_dir", type=Path, metavar="DIR",
+                     help="directory of FASTA proteomes")
     run.add_argument("-o", "--outdir", type=Path, required=True)
     run.add_argument("--tools", default="all")
     run.add_argument("--labels", help="comma-separated species labels, one per FASTA (default: file names)")
@@ -226,17 +228,29 @@ def cmd_check(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
-def cmd_run(args: argparse.Namespace) -> int:
+def _run_fastas(args: argparse.Namespace) -> list[Path]:
+    if args.fasta_dir is not None and args.fastas:
+        raise ProteomeError("use either -f DIR or a list of FASTA files, not both")
+    if args.fasta_dir is not None:
+        return fasta_paths_in(args.fasta_dir)
     if len(args.fastas) < 2:
-        print("error: need at least two FASTA files", file=sys.stderr)
+        raise ProteomeError("need at least two FASTA files, or -f DIR")
+    return list(args.fastas)
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    try:
+        fastas = _run_fastas(args)
+    except ProteomeError as error:
+        print(f"error: {error}", file=sys.stderr)
         return 2
 
     labels = None
     if args.labels:
         parts = [p.strip() for p in args.labels.split(",")]
-        if len(parts) != len(args.fastas):
+        if len(parts) != len(fastas):
             print(
-                f"error: --labels needs {len(args.fastas)} comma-separated names, "
+                f"error: --labels needs {len(fastas)} comma-separated names, "
                 f"got {len(parts)}",
                 file=sys.stderr,
             )
@@ -245,7 +259,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     collapse = None
     if args.collapse:
-        if len(args.fastas) != 2:
+        if len(fastas) != 2:
             print("error: --collapse is only defined for exactly two proteomes", file=sys.stderr)
             return 2
         parts = [Path(p.strip()) for p in args.collapse.split(",")]
@@ -259,7 +273,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         tool_options[tool] = argument_string.split()
 
     config = RunConfig(
-        fastas=tuple(args.fastas),
+        fastas=tuple(fastas),
         outdir=args.outdir,
         tools=args.tools,
         labels=labels,

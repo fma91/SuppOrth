@@ -92,6 +92,30 @@ def test_cli_accepts_more_than_two_fastas():
     assert [p.name for p in args.fastas] == ["a.faa", "b.faa", "c.faa"]
 
 
+def test_cli_accepts_a_directory_of_fastas(tmp_path: Path):
+    from supporth.cli import _run_fastas, build_parser
+
+    folder = tmp_path / "proteomes"
+    folder.mkdir()
+    (folder / "a.faa").write_text(">a1\nMAAAK\n")
+    (folder / "b.faa").write_text(">b1\nMBBBK\n")
+    (folder / "notes.txt").write_text("ignore me\n")
+    args = build_parser().parse_args(["run", "-f", str(folder), "-o", "out"])
+    paths = _run_fastas(args)
+    assert [p.name for p in paths] == ["a.faa", "b.faa"]
+
+
+def test_cli_rejects_files_and_directory_together():
+    from supporth.cli import _run_fastas, build_parser
+    from supporth.proteomes import ProteomeError
+
+    args = build_parser().parse_args(
+        ["run", "a.faa", "b.faa", "-f", "proteomes", "-o", "out"]
+    )
+    with pytest.raises(ProteomeError, match="not both"):
+        _run_fastas(args)
+
+
 def test_pairs_are_oriented_and_filtered(proteomes):
     sp1, sp2 = proteomes
     raw = [

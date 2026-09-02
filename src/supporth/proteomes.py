@@ -17,6 +17,7 @@ from Bio import SeqIO
 
 # Extension used for staged inputs; the only one all three predictors accept.
 STAGED_SUFFIX = ".fasta"
+FASTA_SUFFIXES = (".faa", ".fa", ".fasta", ".pep", ".fas")
 
 
 @dataclass
@@ -101,6 +102,29 @@ def load_proteomes(
     return proteomes
 
 
+def fasta_paths_in(directory: Path) -> list[Path]:
+    """FASTA files in ``directory``, sorted by name. Not recursive."""
+    directory = Path(directory).expanduser().resolve()
+    if not directory.is_dir():
+        raise ProteomeError(f"not a directory: {directory}")
+    found = [path for path in sorted(directory.iterdir()) if _is_fasta(path)]
+    if len(found) < 2:
+        raise ProteomeError(
+            f"{directory} has {len(found)} FASTA file(s); need at least two "
+            f"({', '.join(FASTA_SUFFIXES)})"
+        )
+    return found
+
+
+def _is_fasta(path: Path) -> bool:
+    if not path.is_file() or path.name.startswith("."):
+        return False
+    name = path.name.lower()
+    if name.endswith(".gz"):
+        name = name[: -len(".gz")]
+    return any(name.endswith(suffix) for suffix in FASTA_SUFFIXES)
+
+
 def load_pair(fasta1: Path, fasta2: Path, label1: str = "", label2: str = "") -> tuple[Proteome, Proteome]:
     labels = (label1, label2) if (label1 or label2) else None
     first, second = load_proteomes((fasta1, fasta2), labels)
@@ -129,7 +153,10 @@ def stage_input_dir(destination: Path, proteomes: Sequence[Proteome]) -> Path:
 
 def _label(fasta: Path) -> str:
     name = fasta.name
-    for suffix in (".gz", ".faa", ".fa", ".fasta", ".pep", ".fas"):
+    if name.endswith(".gz"):
+        name = name[: -len(".gz")]
+    for suffix in FASTA_SUFFIXES:
         if name.endswith(suffix):
             name = name[: -len(suffix)]
+            break
     return name or fasta.stem
