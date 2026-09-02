@@ -51,8 +51,45 @@ def test_overlapping_identifiers_are_rejected(tmp_path: Path):
     first, second = tmp_path / "one.faa", tmp_path / "two.faa"
     first.write_text(same)
     second.write_text(same)
-    with pytest.raises(ProteomeError, match="occur in both proteomes"):
+    with pytest.raises(ProteomeError, match="occur in both"):
         load_pair(first, second)
+
+
+def test_three_proteomes_are_loaded_in_input_order(tmp_path: Path):
+    from supporth.proteomes import load_proteomes
+
+    paths = []
+    for name, seqs in (
+        ("one.faa", ">a1\nMAAAK\n"),
+        ("two.faa", ">b1\nMBBBK\n"),
+        ("three.faa", ">c1\nMCCCK\n"),
+    ):
+        path = tmp_path / name
+        path.write_text(seqs)
+        paths.append(path)
+    proteomes = load_proteomes(paths)
+    assert [p.label for p in proteomes] == ["one", "two", "three"]
+    assert proteomes[2].ids == frozenset({"c1"})
+
+
+def test_labels_must_match_the_number_of_fastas(tmp_path: Path):
+    from supporth.proteomes import ProteomeError, load_proteomes
+
+    first, second, third = tmp_path / "a.faa", tmp_path / "b.faa", tmp_path / "c.faa"
+    first.write_text(">a1\nMAAAK\n")
+    second.write_text(">b1\nMBBBK\n")
+    third.write_text(">c1\nMCCCK\n")
+    with pytest.raises(ProteomeError, match="3 FASTA"):
+        load_proteomes((first, second, third), labels=("A", "B"))
+
+
+def test_cli_accepts_more_than_two_fastas():
+    from supporth.cli import build_parser
+
+    args = build_parser().parse_args(
+        ["run", "a.faa", "b.faa", "c.faa", "-o", "out"]
+    )
+    assert [p.name for p in args.fastas] == ["a.faa", "b.faa", "c.faa"]
 
 
 def test_pairs_are_oriented_and_filtered(proteomes):
@@ -84,6 +121,33 @@ def test_tabular_parser_ignores_scores_and_headers(tmp_path: Path, proteomes):
     assert pairs == {("a1", "b1"), ("a2", "b2"), ("a3", "b2")}
 
 
+def test_tabular_parser_keeps_ncbi_pipe_identifiers(tmp_path: Path):
+    first = tmp_path / "Mgenitalium.faa"
+    second = tmp_path / "Mhyopneumoniae.faa"
+    first.write_text(">gi|3844967|gb|AAC71606.1|\nMAAAK\n")
+    second.write_text(">gi|144227418|gb|AAZ44097.2|\nMAAAK\n")
+    sp1, sp2 = load_pair(first, second)
+    table = tmp_path / "pairs.tsv"
+    table.write_text("gi|144227418|gb|AAZ44097.2|\tgi|3844967|gb|AAC71606.1|\n")
+    pairs = set(pairs_from_table(table, sp1.ids, sp2.ids))
+    assert pairs == {("gi|3844967|gb|AAC71606.1|", "gi|144227418|gb|AAZ44097.2|")}
+
+
+def test_tabular_parser_emits_all_cross_species_pairs_on_a_row(tmp_path: Path):
+    from supporth.proteomes import load_proteomes
+
+    paths = []
+    for name, header in (("one.faa", "a1"), ("two.faa", "b1"), ("three.faa", "c1")):
+        path = tmp_path / name
+        path.write_text(f">{header}\nMAAAK\n")
+        paths.append(path)
+    proteomes = load_proteomes(paths)
+    table = tmp_path / "og.tsv"
+    table.write_text("OG1\ta1\tb1\tc1\n")
+    pairs = set(pairs_from_table(table, *[p.ids for p in proteomes]))
+    assert pairs == {("a1", "b1"), ("a1", "c1"), ("b1", "c1")}
+
+
 def test_consensus_counts_support_and_records_the_pattern(proteomes):
     sp1, sp2 = proteomes
     results = [
@@ -97,13 +161,14 @@ def test_consensus_counts_support_and_records_the_pattern(proteomes):
     table = consensus.build_table(results, index, sp1, sp2)
 
     top = table.iloc[0]
-    assert (top["speciesA"], top["speciesB"]) == ("a1", "b1")
+    assert (top["Species1"], top["Species2"]) == ("speciesA", "speciesB")
+    assert (top["Protein1"], top["Protein2"]) == ("a1", "b1")
     assert top["Lv_support"] == 3
     assert top["SupportedBy"] == "F,S,B"
     assert (top["t1"], top["t2"], top["t3"]) == (1, 1, 1)
     assert top["Identity"] == 88.5
 
-    unaligned = table[table["speciesA"] == "a2"].iloc[0]
+    unaligned = table[table["Protein1"] == "a2"].iloc[0]
     assert unaligned["Lv_support"] == 1
     assert unaligned["SupportedBy"] == "F"
     assert (unaligned["t1"], unaligned["t2"], unaligned["t3"]) == (1, 0, 0)
@@ -240,9 +305,10 @@ class StubAdapter(Adapter):
         (out / "pairs.tsv").write_text("a1\tb1\na2\tb2\n")
         return out
 
-    def parse(self, native_root: Path, sp1, sp2):
-        raw = list(pairs_from_table(native_root / "pairs.tsv", sp1.ids, sp2.ids))
-        return canonical.build_result(self.name, self.label, raw, sp1, sp2)
+    def parse(self, native_root: Path, proteomes, *rest):
+        loaded = (proteomes, *rest) if hasattr(proteomes, "ids") else tuple(proteomes)
+        raw = list(pairs_from_table(native_root / "pairs.tsv", *[p.ids for p in loaded]))
+        return canonical.build_result(self.name, self.label, raw, loaded)
 
     def method_profile(self, context: StageContext) -> MethodProfile:
         return MethodProfile(search="stub", clustering="stub")
@@ -328,6 +394,7 @@ def test_search_jobs_collapse_to_four_for_a_species_pair():
     from supporth.adapters import of_config
 
     assert of_config.search_job_count(2) == 4
+    assert of_config.search_job_count(4) == 16
     assert of_config.search_job_count(2, double_blast=False) == 3
     # The reason the stock configuration wastes a big machine: four jobs.
     assert of_config.threads_per_job(32, of_config.search_job_count(2)) == 8
@@ -590,7 +657,7 @@ def test_pipeline_ingests_user_supplied_oma(tmp_path, proteomes, monkeypatch):
     assert names == ["stub", "oma"]
     assert "oma" in outcome["table"].columns
     pair = outcome["table"]
-    row = pair[(pair["speciesA"] == "a1") & (pair["speciesB"] == "b1")].iloc[0]
+    row = pair[(pair["Protein1"] == "a1") & (pair["Protein2"] == "b1")].iloc[0]
     assert row["oma"] == 1
     assert row["stub"] == 1
 
@@ -764,6 +831,43 @@ def test_pipeline_runs_end_to_end_and_supports_resume(tmp_path, proteomes, monke
     config.resume = True
     again = pipeline.run_pipeline(config, log=lambda *_: None)
     assert again["reports"][0].status == "reused"
+
+
+def test_pipeline_runs_three_proteomes_as_one_job(tmp_path, monkeypatch):
+
+    paths = []
+    for name, seqs in (
+        ("one.faa", ">a1\nMAAAK\n"),
+        ("two.faa", ">b1\nMBBBK\n"),
+        ("three.faa", ">c1\nMCCCK\n"),
+    ):
+        path = tmp_path / name
+        path.write_text(seqs)
+        paths.append(path)
+
+    class TripleStub(StubAdapter):
+        def run(self, context: StageContext) -> Path:
+            out = context.work_dir / "results"
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "pairs.tsv").write_text("a1\tb1\na1\tc1\nb1\tc1\n")
+            return out
+
+    monkeypatch.setattr(pipeline, "resolve", lambda _: [TripleStub()])
+    config = pipeline.RunConfig(
+        fastas=tuple(paths),
+        outdir=tmp_path / "out3",
+        annotate="none",
+        support_lv=1,
+    )
+    outcome = pipeline.run_pipeline(config, log=lambda *_: None)
+    table = outcome["table"]
+    assert set(zip(table["Protein1"], table["Protein2"])) == {
+        ("a1", "b1"),
+        ("a1", "c1"),
+        ("b1", "c1"),
+    }
+    assert set(table["Species1"]) <= {"one", "two"}
+    assert {"one", "two", "three"} == set(table["Species1"]) | set(table["Species2"])
 
 
 def test_pipeline_reports_missing_predictors_before_running(tmp_path, proteomes, monkeypatch):

@@ -6,10 +6,11 @@ is pinned to one core (``diamond ... -p 1``, ``mmseqs ... --threads 1``), and th
 built-in ``blast`` command is assembled in Python with no thread flag at all.
 
 That model works when there are many species, because the job count is the
-square of the number of proteomes. SuppOrth compares exactly two, which yields
-only four search jobs (A-A, A-B, B-A, B-B). Four single-threaded processes are
-all you get, no matter how large ``-t`` is, so most of a big machine sits idle
-during by far the longest stage of the run.
+square of the number of proteomes. Two species yield only four search jobs
+(A-A, A-B, B-A, B-B); more species recover more concurrency. Four
+single-threaded processes are all you get on a pair, no matter how large
+``-t`` is, so most of a big machine sits idle during by far the longest
+stage of a two-proteome run.
 
 The fix is OrthoFinder's own extension mechanism: additional search methods
 declared in ``config.json`` and selected with ``-S``. SuppOrth registers

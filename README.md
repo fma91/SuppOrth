@@ -60,9 +60,16 @@ Check what you have:
 Usage
 -----------------------
 
-Give it two proteomes and it does the rest:
+Give it the proteomes and it does the rest. The predictors already take a
+directory of FASTAs; SuppOrth stages every file you pass and runs each tool
+once:
 
     suppOrth run speciesA.faa speciesB.faa -o results/ -t 16
+    suppOrth run Mycoplasma_*.faa -o results/ -t 16
+
+The consensus table is one row per cross-species protein pair
+(`Species1`, `Species2`, `Protein1`, `Protein2`). Two files still work; more
+than two is the same job, not a series of pairwise runs.
 
 The predictors run **in series** — each one saturates the machine on its own —
 and every finished stage is written to disk, so an interrupted run resumes
@@ -181,7 +188,7 @@ A run directory contains:
 
 | File | Contents |
 |------|----------|
-| `suppOrth.tsv` | one row per protein pair: `Lv_support`, `SupportedBy`, identity, e-value, bitscore |
+| `suppOrth.tsv` | one row per cross-species protein pair: `Species1`, `Species2`, `Protein1`, `Protein2`, `Lv_support`, `SupportedBy`, identity, e-value, bitscore |
 | `suppOrth.png` / `suppOrth.svg` | protein-pair Venn, pairwise overlap heatmap, and exclusive-pair bars |
 | `agreement_summary.tsv` | how many pairs each exact combination of predictors accounts for |
 | `pairs/<tool>.json` | each predictor's calls in canonical form, reusable with `--resume` |
@@ -192,17 +199,10 @@ A run directory contains:
 Example (`head` of `suppOrth.tsv`):
 
 ```
-contortus      tmuris            Lv_support  SupportedBy  orthofinder  sonicparanoid  broccoli  oma  Identity  e_val  Bitscore
-XGW29141.1     TMUE_3000011065   4           F,S,B,O      1            1              1         1    49.528    0.0    6611.0
-XGW23970.1     TMUE_3000013576   4           F,S,B,O      1            1              1         1    58.248    0.0    5622.0
-XGW20628.1     TMUE_1000003594   4           F,S,B,O      1            1              1         1    48.045    0.0    4532.0
-XGW20629.1     TMUE_1000003594   4           F,S,B,O      1            1              1         1    48.045    0.0    4532.0
-XGW20630.1     TMUE_1000003594   4           F,S,B,O      1            1              1         1    48.045    0.0    4532.0
-XGW20631.1     TMUE_1000003594   4           F,S,B,O      1            1              1         1    48.045    0.0    4532.0
-XGW20632.1     TMUE_1000003594   4           F,S,B,O      1            1              1         1    48.045    0.0    4532.0
-XGW20634.1     TMUE_1000003594   4           F,S,B,O      1            1              1         1    48.045    0.0    4532.0
-XGW20635.1     TMUE_1000003594   4           F,S,B,O      1            1              1         1    48.045    0.0    4532.0
-XGW16501.1     TMUE_2000006962   4           F,S,B,O      1            1              1         1    88.86     0.0    4352.0
+Species1       Species2  Protein1       Protein2          Lv_support  SupportedBy  orthofinder  sonicparanoid  broccoli  oma  Identity  e_val  Bitscore
+contortus      tmuris    XGW29141.1     TMUE_3000011065   4           F,S,B,O      1            1              1         1    49.528    0.0    6611.0
+contortus      tmuris    XGW23970.1     TMUE_3000013576   4           F,S,B,O      1            1              1         1    58.248    0.0    5622.0
+contortus      tmuris    XGW20628.1     TMUE_1000003594   4           F,S,B,O      1            1              1         1    48.045    0.0    4532.0
 ```
 
 `SupportedBy` holds the **exact set** of predictors that reported a pair, so a

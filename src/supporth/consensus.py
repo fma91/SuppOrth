@@ -16,17 +16,19 @@ from __future__ import annotations
 import json
 import pickle
 from collections import Counter
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
+from typing import Iterable, Mapping
 
 import pandas as pd
 
 from .canonical import Pair, PredictorResult
-from .proteomes import Proteome
+from .proteomes import Proteome, as_proteomes
 from .similarity import SimilarityIndex
 
 # Comma, not plus: a plus-joined pattern is awkward to split in R, pandas, or Excel.
 SUPPORT_SEPARATOR = ","
+SPECIES_COLUMNS = ("Species1", "Species2", "Protein1", "Protein2")
 ANNOTATION_COLUMNS = ("Identity", "e_val", "Bitscore")
 
 
@@ -61,12 +63,25 @@ def tool_flag_columns(frame: pd.DataFrame) -> list[str]:
     return flags
 
 
+def protein_columns(frame: pd.DataFrame) -> tuple[str, str]:
+    """Columns that hold the two protein identifiers of a pair."""
+    if "Protein1" in frame.columns and "Protein2" in frame.columns:
+        return "Protein1", "Protein2"
+    return str(frame.columns[0]), str(frame.columns[1])
+
+
 def build_table(
     results: Sequence[PredictorResult],
     similarity: SimilarityIndex | None,
-    sp1: Proteome,
-    sp2: Proteome,
+    proteomes: Sequence[Proteome] | Proteome,
+    *rest: Proteome,
 ) -> pd.DataFrame:
+    loaded = as_proteomes(proteomes, *rest)
+    owner: dict[str, str] = {}
+    for proteome in loaded:
+        for gene in proteome.ids:
+            owner[gene] = proteome.label
+
     tools: list[str] = []
     labels_for: dict[str, str] = {}
     by_tool: dict[str, set[Pair]] = {}
@@ -87,8 +102,10 @@ def build_table(
         hit = similarity.get(left, right) if similarity else None
         records.append(
             {
-                sp1.label: left,
-                sp2.label: right,
+                "Species1": owner.get(left, ""),
+                "Species2": owner.get(right, ""),
+                "Protein1": left,
+                "Protein2": right,
                 "Lv_support": len(supported_by),
                 "SupportedBy": SUPPORT_SEPARATOR.join(supported_by),
                 **flags,
@@ -101,8 +118,7 @@ def build_table(
     frame = pd.DataFrame.from_records(
         records,
         columns=[
-            sp1.label,
-            sp2.label,
+            *SPECIES_COLUMNS,
             "Lv_support",
             "SupportedBy",
             *tools,
@@ -143,7 +159,7 @@ def collapse_to_genes(
     prot2gene1 = _load_mapping(map1)
     prot2gene2 = _load_mapping(map2)
 
-    sp1_col, sp2_col = frame.columns[0], frame.columns[1]
+    sp1_col, sp2_col = protein_columns(frame)
     work = frame.copy()
     work["GeneID1"] = work[sp1_col].map(prot2gene1)
     work["GeneID2"] = work[sp2_col].map(prot2gene2)

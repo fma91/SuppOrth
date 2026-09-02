@@ -1,19 +1,21 @@
 """One canonical representation of a predictor's result.
 
 Every adapter converts its tool's native output into the same object: a set of
-ordered ``(species1_id, species2_id)`` pairs. Downstream code therefore never
-needs to know which tool produced a result, and the old split between
-pair-tuple sets and query-keyed dictionaries disappears.
+ordered ``(protein_a, protein_b)`` pairs, with the protein from the earlier
+input FASTA first. Downstream code therefore never needs to know which tool
+produced a result, and the old split between pair-tuple sets and query-keyed
+dictionaries disappears.
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
-from .proteomes import Proteome
+from .proteomes import Proteome, as_proteomes
 
 Pair = tuple[str, str]
 
@@ -43,36 +45,48 @@ def build_result(
     tool: str,
     label: str,
     raw_pairs: Iterable[Pair],
-    sp1: Proteome,
-    sp2: Proteome,
+    proteomes: Sequence[Proteome] | Proteome,
+    *rest: Proteome | Iterable[Path],
     source_files: Iterable[Path] = (),
 ) -> PredictorResult:
     """Orient and filter raw pairs against the input proteomes.
 
-    Pairs are stored species1-first. Within-species pairs are dropped: those are
-    the tools reporting paralogues, which is a different relationship from the
-    cross-species orthology this consensus is about.
+    Pairs are stored with the earlier input FASTA first. Within-species pairs
+    are dropped: those are the tools reporting paralogues, which is a different
+    relationship from the cross-species orthology this consensus is about.
+
+    ``build_result(..., sp1, sp2)`` and ``build_result(..., sp1, sp2, tables)``
+    remain valid; a sequence of proteomes is preferred for *n*-species runs.
     """
+    extras: list[Proteome] = []
+    for item in rest:
+        if isinstance(item, Proteome):
+            extras.append(item)
+        else:
+            source_files = item
+            break
+    loaded = as_proteomes(proteomes, *extras)
+
+    owner: dict[str, int] = {}
+    for index, proteome in enumerate(loaded):
+        for gene in proteome.ids:
+            owner[gene] = index
+
     result = PredictorResult(
         tool=tool,
         label=label,
         source_files=[str(p) for p in source_files],
     )
     for left, right in raw_pairs:
-        in1_left, in2_left = left in sp1.ids, left in sp2.ids
-        in1_right, in2_right = right in sp1.ids, right in sp2.ids
-
-        if not (in1_left or in2_left) or not (in1_right or in2_right):
+        left_i = owner.get(left)
+        right_i = owner.get(right)
+        if left_i is None or right_i is None:
             result.dropped_unknown += 1
             continue
-        if in1_left and in1_right:
+        if left_i == right_i:
             result.dropped_same_species += 1
             continue
-        if in2_left and in2_right:
-            result.dropped_same_species += 1
-            continue
-
-        result.pairs.add((left, right) if in1_left else (right, left))
+        result.pairs.add((left, right) if left_i < right_i else (right, left))
     return result
 
 

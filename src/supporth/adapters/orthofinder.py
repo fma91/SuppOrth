@@ -23,6 +23,8 @@ from __future__ import annotations
 import csv
 import shutil
 from dataclasses import dataclass
+from collections.abc import Sequence
+from itertools import combinations
 from pathlib import Path
 
 from ..canonical import PredictorResult, build_result
@@ -142,7 +144,7 @@ class OrthoFinder(Adapter):
     def method_profile(self, context: StageContext) -> MethodProfile:
         methods = parse_methods(context.options)
         program = methods.search or self.search_program
-        jobs = of_config.search_job_count(2)
+        jobs = of_config.search_job_count(len(context.proteomes))
         return MethodProfile(
             search=f"{program} (via OrthoFinder)",
             clustering="MCL on the BLAST graph",
@@ -171,7 +173,7 @@ class OrthoFinder(Adapter):
         methods = parse_methods(context.options)
         requested = methods.search or self.search_program
 
-        jobs = of_config.search_job_count(2)
+        jobs = of_config.search_job_count(len(context.proteomes))
         per_job = of_config.threads_per_job(context.threads, jobs)
 
         with of_config.config_lock(root):
@@ -243,11 +245,12 @@ class OrthoFinder(Adapter):
             return program
         return of_config.register_threaded_search(config, program, threads_per_search)
 
-    def parse(self, native_root: Path, sp1: Proteome, sp2: Proteome) -> PredictorResult:
+    def parse(self, native_root: Path, proteomes: Sequence[Proteome] | Proteome, *rest: Proteome) -> PredictorResult:
+        loaded = (proteomes, *rest) if isinstance(proteomes, Proteome) else tuple(proteomes)
         pairwise = self._pairwise_tables(native_root)
         note = ""
         if pairwise:
-            raw, sources = self._read_pairwise(pairwise, sp1, sp2)
+            raw, sources = self._read_pairwise(pairwise, loaded)
         else:
             table = self._orthogroups_table(native_root)
             if table is None:
@@ -256,13 +259,13 @@ class OrthoFinder(Adapter):
                     f"Expected Orthologues/*__v__*.tsv or Orthogroups/Orthogroups.tsv; "
                     f"check the stage log."
                 )
-            raw, sources = self._read_orthogroups(table, sp1, sp2)
+            raw, sources = self._read_orthogroups(table, loaded)
             note = (
                 "orthogroup fallback: pairs expanded from clusters, not from "
                 "OrthoFinder's pairwise orthologue tables"
             )
 
-        result = build_result(self.name, self.label, raw, sp1, sp2, sources)
+        result = build_result(self.name, self.label, raw, loaded, source_files=sources)
         result.note = note
         return result
 
@@ -285,17 +288,17 @@ class OrthoFinder(Adapter):
     # ---- readers -------------------------------------------------------
 
     def _read_pairwise(
-        self, tables: list[Path], sp1: Proteome, sp2: Proteome
+        self, tables: list[Path], proteomes: Sequence[Proteome]
     ) -> tuple[list[tuple[str, str]], list[Path]]:
         raw: list[tuple[str, str]] = []
         used: list[Path] = []
-        wanted = {sp1.label, sp2.label}
+        wanted = {proteome.label for proteome in proteomes}
 
         for table in tables:
             stem = table.stem
             if "__v__" in stem:
                 left_species, right_species = stem.split("__v__", 1)
-                if wanted and {left_species, right_species} != wanted:
+                if wanted and not {left_species, right_species} <= wanted:
                     continue
             used.append(table)
             with table.open(newline="") as handle:
@@ -314,7 +317,7 @@ class OrthoFinder(Adapter):
         return raw, used
 
     def _read_orthogroups(
-        self, table: Path, sp1: Proteome, sp2: Proteome
+        self, table: Path, proteomes: Sequence[Proteome]
     ) -> tuple[list[tuple[str, str]], list[Path]]:
         raw: list[tuple[str, str]] = []
         delimiter = "\t" if table.suffix == ".tsv" else ","
@@ -325,9 +328,9 @@ class OrthoFinder(Adapter):
                 return raw, [table]
             for row in reader:
                 genes = [gene for cell in row[1:] for gene in _split_genes(cell)]
-                first = [g for g in genes if g in sp1.ids]
-                second = [g for g in genes if g in sp2.ids]
-                for left in first:
-                    for right in second:
-                        raw.append((left, right))
+                groups = [[g for g in genes if g in proteome.ids] for proteome in proteomes]
+                for first, second in combinations(groups, 2):
+                    for left in first:
+                        for right in second:
+                            raw.append((left, right))
         return raw, [table]

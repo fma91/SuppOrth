@@ -23,7 +23,7 @@ import pandas as pd
 from . import canonical, consensus, deps, figures, manifest, paths, similarity, shell
 from .adapters import Adapter, StageContext, resolve
 from .adapters.oma import OMA
-from .proteomes import Proteome, load_pair, stage_input_dir
+from .proteomes import Proteome, load_proteomes, stage_input_dir
 
 
 class PipelineError(RuntimeError):
@@ -32,11 +32,12 @@ class PipelineError(RuntimeError):
 
 @dataclass
 class RunConfig:
-    fasta1: Path
-    fasta2: Path
     outdir: Path
+    fastas: tuple[Path, ...] = ()
+    fasta1: Path | None = None
+    fasta2: Path | None = None
     tools: str = "all"
-    labels: tuple[str, str] | None = None
+    labels: tuple[str, ...] | None = None
     threads: int = 0
     annotate: str = "diamond"
     resume: bool = False
@@ -45,6 +46,14 @@ class RunConfig:
     collapse: tuple[Path, Path] | None = None
     tool_options: dict[str, list[str]] = field(default_factory=dict)
     oma: Path | None = None
+
+    def __post_init__(self) -> None:
+        if self.fastas:
+            self.fastas = tuple(Path(path) for path in self.fastas)
+        elif self.fasta1 is not None and self.fasta2 is not None:
+            self.fastas = (Path(self.fasta1), Path(self.fasta2))
+        if len(self.fastas) < 2:
+            raise ValueError("need at least two FASTA files")
 
 
 @dataclass
@@ -71,17 +80,16 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
     work_root = outdir / "work"
     work_root.mkdir(parents=True, exist_ok=True)
 
-    labels = config.labels or ("", "")
-    sp1, sp2 = load_pair(config.fasta1, config.fasta2, labels[0], labels[1])
-    log(f"Species 1: {sp1.label} ({sp1.size} proteins)")
-    log(f"Species 2: {sp2.label} ({sp2.size} proteins)")
+    proteomes = load_proteomes(config.fastas, config.labels)
+    for index, proteome in enumerate(proteomes, start=1):
+        log(f"Species {index}: {proteome.label} ({proteome.size} proteins)")
 
     adapters = resolve(config.tools)
     threads = shell.cpu_count(config.threads or None)
 
     _preflight(adapters, config.tool_options, log)
 
-    input_dir = stage_input_dir(work_root / "input", (sp1, sp2))
+    input_dir = stage_input_dir(work_root / "input", proteomes)
 
     reports: list[StageReport] = []
     results: list[canonical.PredictorResult] = []
@@ -110,8 +118,7 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
         context = StageContext(
             input_dir=input_dir,
             work_dir=work_root / adapter.name,
-            sp1=sp1,
-            sp2=sp2,
+            proteomes=proteomes,
             threads=threads,
             options=config.tool_options.get(adapter.name, []),
         )
@@ -120,7 +127,7 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
         stage_started = time.monotonic()
         try:
             native_root = adapter.run(context)
-            result = adapter.parse(native_root, sp1, sp2)
+            result = adapter.parse(native_root, proteomes)
         except Exception as error:  # noqa: BLE001 - one predictor must not sink the run
             elapsed = time.monotonic() - stage_started
             log(f"  FAILED after {elapsed / 60:.1f} min: {error}")
@@ -160,7 +167,7 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
         log(f"  {result.summary()} in {elapsed / 60:.1f} min")
 
     if config.oma:
-        oma_result, oma_report = _ingest_oma(config, sp1, sp2, outdir, log)
+        oma_result, oma_report = _ingest_oma(config, proteomes, outdir, log)
         if oma_result is not None:
             results.append(oma_result)
             reports.append(oma_report)
@@ -173,8 +180,7 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
 
     log("\nAnnotating with alignment statistics")
     index = similarity.build_index(
-        sp1,
-        sp2,
+        proteomes,
         work_root / "similarity",
         threads=threads,
         program=config.annotate,
@@ -182,7 +188,7 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
     )
     log(f"  {len(index)} aligned pairs available for annotation")
 
-    table = consensus.build_table(results, index, sp1, sp2)
+    table = consensus.build_table(results, index, proteomes)
     unfiltered = len(table)
     table = consensus.filter_table(
         table,
@@ -206,12 +212,14 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
 
     collapsed_path = None
     if config.collapse:
+        if len(proteomes) != 2:
+            raise PipelineError("--collapse is only defined for exactly two proteomes")
         collapsed = consensus.collapse_to_genes(table, *config.collapse)
         collapsed_path = outdir / "suppOrth.genes.tsv"
         collapsed.to_csv(collapsed_path, sep="\t", index=False)
         log(f"Collapsed to {len(collapsed)} gene pairs")
 
-    provenance = _provenance(config, sp1, sp2, reports, table, threads)
+    provenance = _provenance(config, proteomes, reports, table, threads)
     with (outdir / "provenance.json").open("w") as handle:
         json.dump(provenance, handle, indent=2)
         handle.write("\n")
@@ -233,8 +241,7 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
 
 def _ingest_oma(
     config: RunConfig,
-    sp1: Proteome,
-    sp2: Proteome,
+    proteomes: tuple[Proteome, ...],
     outdir: Path,
     log: Callable[[str], None],
 ) -> tuple[canonical.PredictorResult | None, StageReport]:
@@ -259,7 +266,7 @@ def _ingest_oma(
 
     started = time.monotonic()
     try:
-        result = adapter.parse(source, sp1, sp2)
+        result = adapter.parse(source, proteomes)
     except Exception as error:  # noqa: BLE001 - OMA must not sink the other tools
         elapsed = time.monotonic() - started
         log(f"  FAILED: {error}")
@@ -270,7 +277,7 @@ def _ingest_oma(
             seconds=elapsed,
             n_pairs=0,
             method=adapter.method_profile(
-                StageContext(input_dir=source, work_dir=source, sp1=sp1, sp2=sp2)
+                StageContext(input_dir=source, work_dir=source, proteomes=proteomes)
             ).as_dict(),
             commit="user-supplied",
             error=str(error),
@@ -287,7 +294,7 @@ def _ingest_oma(
         seconds=elapsed,
         n_pairs=len(result.pairs),
         method=adapter.method_profile(
-            StageContext(input_dir=source, work_dir=source, sp1=sp1, sp2=sp2)
+            StageContext(input_dir=source, work_dir=source, proteomes=proteomes)
         ).as_dict(),
         commit="user-supplied",
         dropped_unknown=result.dropped_unknown,
@@ -336,8 +343,7 @@ def _sha256(path: Path) -> str:
 
 def _provenance(
     config: RunConfig,
-    sp1: Proteome,
-    sp2: Proteome,
+    proteomes: tuple[Proteome, ...],
     reports: list[StageReport],
     table: pd.DataFrame,
     threads: int,
@@ -346,8 +352,12 @@ def _provenance(
     return {
         "environment": manifest.environment(),
         "inputs": {
-            sp1.label: {"path": str(sp1.fasta), "n_proteins": sp1.size, "sha256": _sha256(sp1.fasta)},
-            sp2.label: {"path": str(sp2.fasta), "n_proteins": sp2.size, "sha256": _sha256(sp2.fasta)},
+            proteome.label: {
+                "path": str(proteome.fasta),
+                "n_proteins": proteome.size,
+                "sha256": _sha256(proteome.fasta),
+            }
+            for proteome in proteomes
         },
         "settings": {
             "tools": config.tools,

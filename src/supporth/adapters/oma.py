@@ -6,19 +6,20 @@ cluster, with more than two genomes. What SuppOrth needs is the pairwise
 orthologue tables from that run, pointed at with ``--oma``.
 
 The files live under ``Output/PairwiseOrthologs/``. Each pair is listed once.
-Within-species files are not produced; extra species in a multi-genome run
-are ignored because their identifiers are not in the two input proteomes.
+Within-species files are not produced. Extra species in a multi-genome OMA run
+are ignored unless their identifiers are in the FASTAs passed to ``run``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from ..canonical import PredictorResult, build_result
 from ..method_stack import OMA as OMA_STACK
 from ..proteomes import Proteome
 from .base import Adapter, AdapterError, MethodProfile, StageContext
-from .tabular import pairs_from_table
+from .tabular import id_sets, pairs_from_table
 
 
 class OMA(Adapter):
@@ -55,8 +56,9 @@ class OMA(Adapter):
             "OMA is not run by suppOrth; pass --oma PATH to an existing Output/ directory"
         )
 
-    def parse(self, native_root: Path, sp1: Proteome, sp2: Proteome) -> PredictorResult:
-        tables = self.result_tables(native_root, sp1=sp1, sp2=sp2)
+    def parse(self, native_root: Path, proteomes: Sequence[Proteome] | Proteome, *rest: Proteome) -> PredictorResult:
+        loaded = (proteomes, *rest) if isinstance(proteomes, Proteome) else tuple(proteomes)
+        tables = self.result_tables(native_root, proteomes=loaded)
         if not tables:
             raise AdapterError(
                 f"no OMA pairwise tables under {native_root}. "
@@ -64,21 +66,24 @@ class OMA(Adapter):
             )
         raw: list[tuple[str, str]] = []
         for table in tables:
-            raw.extend(pairs_from_table(table, sp1.ids, sp2.ids))
-        return build_result(self.name, self.label, raw, sp1, sp2, tables)
+            raw.extend(pairs_from_table(table, *id_sets(loaded)))
+        return build_result(self.name, self.label, raw, loaded, source_files=tables)
 
     def result_tables(
         self,
         native_root: Path,
+        proteomes: Sequence[Proteome] | None = None,
         sp1: Proteome | None = None,
         sp2: Proteome | None = None,
     ) -> list[Path]:
+        if proteomes is None and sp1 is not None and sp2 is not None:
+            proteomes = (sp1, sp2)
         root = Path(native_root).expanduser()
         if root.is_file():
             return [root]
         pairwise = self._pairwise_tables(root)
-        if sp1 is not None and sp2 is not None:
-            pairwise = self._tables_for_species(pairwise, sp1, sp2)
+        if proteomes:
+            pairwise = self._tables_for_species(pairwise, proteomes)
         if pairwise:
             return pairwise
         return sorted(p for p in root.rglob("OrthologousGroups.txt") if p.is_file())
@@ -86,20 +91,19 @@ class OMA(Adapter):
     def _tables_for_species(
         self,
         tables: list[Path],
-        sp1: Proteome,
-        sp2: Proteome,
+        proteomes: Sequence[Proteome],
     ) -> list[Path]:
-        """Keep the pairwise file for these two genomes when the name says so.
+        """Keep pairwise files whose names mention at least two input genomes.
 
         An OMA run often includes extra species. Those files are large and
         contribute no pairs once identifiers are filtered, so they are skipped
-        when a filename such as ``tmuris-contortus.txt`` matches both labels.
+        when a filename such as ``tmuris-contortus.txt`` matches the labels.
         """
-        labels = {sp1.label.lower(), sp2.label.lower()}
+        labels = {proteome.label.lower() for proteome in proteomes}
         named = [
             path
             for path in tables
-            if labels <= {part.lower() for part in path.stem.replace("_", "-").split("-")}
+            if len(labels & {part.lower() for part in path.stem.replace("_", "-").split("-")}) >= 2
         ]
         return named or tables
 

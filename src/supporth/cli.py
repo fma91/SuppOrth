@@ -4,7 +4,7 @@ Three verbs for the work itself:
 
     suppOrth install      set up the shared binaries and the predictors
     suppOrth check        report what is installed and whether it runs
-    suppOrth run          run every predictor on two proteomes, emit a consensus
+    suppOrth run          run every predictor on the proteomes, emit a consensus
 
 and two for the installation, which is large enough to need looking after:
 
@@ -59,8 +59,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="suppOrth",
         description=(
-            "Run several orthology predictors on two proteomes and unify their "
-            "calls into a single support-annotated table."
+            "Run several orthology predictors on two or more proteomes and unify "
+            "their calls into a single support-annotated table."
         ),
     )
     parser.add_argument("--version", action="version", version=f"SuppOrth {__version__}")
@@ -92,11 +92,10 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--tools", default="all")
 
     run = sub.add_parser("run", help="run the predictors and build the consensus")
-    run.add_argument("fasta1", type=Path)
-    run.add_argument("fasta2", type=Path)
+    run.add_argument("fastas", nargs="+", type=Path, metavar="FASTA")
     run.add_argument("-o", "--outdir", type=Path, required=True)
     run.add_argument("--tools", default="all")
-    run.add_argument("--labels", help="comma-separated species labels (default: file names)")
+    run.add_argument("--labels", help="comma-separated species labels, one per FASTA (default: file names)")
     run.add_argument("-t", "--threads", type=int, default=0, help="0 uses all cores but one")
     run.add_argument("--annotate", choices=("diamond", "blast", "none"), default="diamond")
     run.add_argument("--resume", action="store_true", help="reuse completed stages in the output directory")
@@ -228,16 +227,27 @@ def cmd_check(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    if len(args.fastas) < 2:
+        print("error: need at least two FASTA files", file=sys.stderr)
+        return 2
+
     labels = None
     if args.labels:
         parts = [p.strip() for p in args.labels.split(",")]
-        if len(parts) != 2:
-            print("error: --labels needs exactly two comma-separated names", file=sys.stderr)
+        if len(parts) != len(args.fastas):
+            print(
+                f"error: --labels needs {len(args.fastas)} comma-separated names, "
+                f"got {len(parts)}",
+                file=sys.stderr,
+            )
             return 2
-        labels = (parts[0], parts[1])
+        labels = tuple(parts)
 
     collapse = None
     if args.collapse:
+        if len(args.fastas) != 2:
+            print("error: --collapse is only defined for exactly two proteomes", file=sys.stderr)
+            return 2
         parts = [Path(p.strip()) for p in args.collapse.split(",")]
         if len(parts) != 2:
             print("error: --collapse needs exactly two files", file=sys.stderr)
@@ -249,8 +259,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         tool_options[tool] = argument_string.split()
 
     config = RunConfig(
-        fasta1=args.fasta1,
-        fasta2=args.fasta2,
+        fastas=tuple(args.fastas),
         outdir=args.outdir,
         tools=args.tools,
         labels=labels,

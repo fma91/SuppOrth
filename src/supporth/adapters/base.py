@@ -68,10 +68,22 @@ class StageContext:
 
     input_dir: Path
     work_dir: Path
-    sp1: Proteome
-    sp2: Proteome
+    proteomes: tuple[Proteome, ...] = ()
+    sp1: Proteome | None = None
+    sp2: Proteome | None = None
     threads: int = 1
     options: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.proteomes:
+            if self.sp1 is None:
+                self.sp1 = self.proteomes[0]
+            if self.sp2 is None and len(self.proteomes) > 1:
+                self.sp2 = self.proteomes[1]
+        elif self.sp1 is not None and self.sp2 is not None:
+            self.proteomes = (self.sp1, self.sp2)
+        else:
+            raise ValueError("StageContext needs at least two proteomes")
 
     @property
     def log(self) -> Path:
@@ -348,7 +360,7 @@ class Adapter(ABC):
         """Execute the predictor and return the root of its native output."""
 
     @abstractmethod
-    def parse(self, native_root: Path, sp1: Proteome, sp2: Proteome) -> PredictorResult:
+    def parse(self, native_root: Path, proteomes: Sequence[Proteome] | Proteome, *rest: Proteome) -> PredictorResult:
         """Convert native output into canonical oriented pairs."""
 
     @abstractmethod

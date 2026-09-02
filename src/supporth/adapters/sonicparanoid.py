@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 
 from ..canonical import PredictorResult, build_result
@@ -31,7 +33,7 @@ from ..proteomes import Proteome
 from .. import interpreters, shell
 from ..method_stack import SONICPARANOID
 from .base import Adapter, AdapterError, MethodProfile, StageContext
-from .tabular import pairs_from_table
+from .tabular import id_sets, pairs_from_table
 
 
 class SonicParanoid(Adapter):
@@ -276,7 +278,21 @@ class SonicParanoid(Adapter):
         env = shell.tool_env(threads=threads)
         existing = env.get("PYTHONPATH", "")
         env["PYTHONPATH"] = f"{target}:{existing}" if existing else str(target)
+        # macOS Python 3.8+ starts multiprocessing with 'spawn'. SonicParanoid's
+        # Cython workers pickle a local wrapper that spawn cannot serialise.
+        # fork avoids that; the ObjC flag stops the runtime aborting the fork.
+        if sys.platform == "darwin":
+            env["OBJC_DISABLE_INITIALIZE_FORK_SAFETY"] = "YES"
         return env
+
+    # Run *before* sonicparanoid is imported so set_start_method still works.
+    _DARWIN_FORK_LAUNCHER = (
+        "import multiprocessing, sys\n"
+        "multiprocessing.set_start_method('fork', force=True)\n"
+        "from sonicparanoid.sonic_paranoid import main\n"
+        "sys.argv[0] = 'sonicparanoid'\n"
+        "raise SystemExit(main())\n"
+    )
 
     def method_profile(self, context: StageContext) -> MethodProfile:
         return MethodProfile(
@@ -295,9 +311,8 @@ class SonicParanoid(Adapter):
         output = context.work_dir / "results"
         output.mkdir(parents=True, exist_ok=True)
 
-        argv = [
-            str(self.prefix_interpreter(root) or self.python()),
-            str(entrypoint),
+        python = str(self.prefix_interpreter(root) or self.python())
+        flags = [
             "-i",
             str(context.input_dir),
             "-o",
@@ -306,6 +321,10 @@ class SonicParanoid(Adapter):
             str(context.threads),
             *context.options,
         ]
+        if sys.platform == "darwin":
+            argv = [python, "-c", self._DARWIN_FORK_LAUNCHER, *flags]
+        else:
+            argv = [python, str(entrypoint), *flags]
         shell.run(
             argv,
             cwd=context.work_dir,
@@ -316,7 +335,8 @@ class SonicParanoid(Adapter):
         )
         return output
 
-    def parse(self, native_root: Path, sp1: Proteome, sp2: Proteome) -> PredictorResult:
+    def parse(self, native_root: Path, proteomes: Sequence[Proteome] | Proteome, *rest: Proteome) -> PredictorResult:
+        loaded = (proteomes, *rest) if isinstance(proteomes, Proteome) else tuple(proteomes)
         tables = self._result_tables(native_root)
         if not tables:
             raise AdapterError(
@@ -325,8 +345,8 @@ class SonicParanoid(Adapter):
             )
         raw: list[tuple[str, str]] = []
         for table in tables:
-            raw.extend(pairs_from_table(table, sp1.ids, sp2.ids))
-        return build_result(self.name, self.label, raw, sp1, sp2, tables)
+            raw.extend(pairs_from_table(table, *id_sets(loaded)))
+        return build_result(self.name, self.label, raw, loaded, source_files=tables)
 
     # SonicParanoid writes its pairwise predictions to
     # 'pairwise_orthologs.<run id>.tsv'. Anything matched later is a fallback

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from .canonical import Pair, PredictorResult
-from .consensus import tool_flag_columns
+from .consensus import protein_columns, tool_flag_columns
 
 # Order and colours follow the proposed figure: OrthoFinder, Broccoli, OMA,
 # SonicParanoid. Unknown tools are appended after these.
@@ -134,7 +134,7 @@ def overlap_report(results: Sequence[PredictorResult]) -> OverlapReport:
 
 def results_from_table(frame) -> list[PredictorResult]:
     """Rebuild pair sets from a consensus TSV (unfiltered or filtered)."""
-    sp1, sp2 = frame.columns[0], frame.columns[1]
+    sp1, sp2 = protein_columns(frame)
     results = []
     for tool in tool_flag_columns(frame):
         mask = frame[tool].fillna(0).astype(int) == 1

@@ -14,10 +14,12 @@ writing 0.0 made unaligned pairs look like terrible alignments.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Sequence
+from itertools import permutations
 from pathlib import Path
 
 from . import shell
-from .proteomes import Proteome
+from .proteomes import Proteome, as_proteomes
 
 OUTFMT = ("qseqid", "sseqid", "pident", "evalue", "bitscore")
 
@@ -69,9 +71,8 @@ class SimilarityIndex:
 
 def index_from_orthofinder(
     work_dir: Path,
-    sp1: Proteome,
-    sp2: Proteome,
-    *,
+    proteomes: Sequence[Proteome] | Proteome,
+    *rest: Proteome,
     log=print,
 ) -> SimilarityIndex:
     """Reuse the all-vs-all search OrthoFinder has already performed.
@@ -84,6 +85,7 @@ def index_from_orthofinder(
     Only the cross-species tables are read. The within-species ones describe
     paralogues, which the consensus table has no column for.
     """
+    loaded = as_proteomes(proteomes, *rest)
     work_dir = Path(work_dir).expanduser()
     if (work_dir / "WorkingDirectory").is_dir():
         work_dir = work_dir / "WorkingDirectory"
@@ -91,13 +93,14 @@ def index_from_orthofinder(
     species = _orthofinder_species(work_dir / "SpeciesIDs.txt")
     wanted = {}
     for index, filename in species.items():
-        for proteome in (sp1, sp2):
-            if filename == proteome.fasta.name:
+        for proteome in loaded:
+            if filename == proteome.fasta.name or filename == f"{proteome.label}.fasta":
                 wanted[index] = proteome
     if len(wanted) < 2:
+        names = ", ".join(p.label for p in loaded)
         raise ValueError(
             f"{work_dir / 'SpeciesIDs.txt'} lists {sorted(species.values())}, which does "
-            f"not cover {sp1.fasta.name} and {sp2.fasta.name}"
+            f"not cover {names}"
         )
 
     names = _orthofinder_sequence_names(work_dir / "SequenceIDs.txt")
@@ -164,16 +167,16 @@ def _load_orthofinder_table(
 
 
 def build_index(
-    sp1: Proteome,
-    sp2: Proteome,
+    proteomes: Sequence[Proteome] | Proteome,
     work_dir: Path,
-    *,
+    *rest: Proteome,
     threads: int = 1,
     program: str = "diamond",
     evalue: float = 1e-3,
     max_targets: int = 10,
     log=print,
 ) -> SimilarityIndex:
+    loaded = as_proteomes(proteomes, *rest)
     work_dir.mkdir(parents=True, exist_ok=True)
     index = SimilarityIndex()
 
@@ -181,7 +184,8 @@ def build_index(
         return index
 
     runner = _diamond if program == "diamond" else _blastp
-    for query, subject, tag in ((sp1, sp2, "fwd"), (sp2, sp1, "rev")):
+    for query, subject in permutations(loaded, 2):
+        tag = f"{query.label}__{subject.label}"
         output = work_dir / f"{tag}.tsv"
         if not output.exists():
             log(f"  {program} {query.label} vs {subject.label}")
